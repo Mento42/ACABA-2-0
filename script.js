@@ -244,21 +244,30 @@ const translations = {
     "sort_newest_first": { fr: "Plus récent d'abord", en: "Newest first" }
 };
 
+// ============================================
+// 1. CONFIGURATION SUPABASE
+// ============================================
+const SUPABASE_URL = 'https://bfpllizknpdcvvtgrfxd.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_YOsXxXh7sFjuJxNY-9WMqQ_96rpXgqs';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ============================================
+// 2. DICTIONNAIRE DE TRADUCTION
+// ============================================
+const translations = {
+  // ... (COLLEZ ICI TOUT VOTRE DICTIONNAIRE 'translations' ORIGINAL) ...
+};
 const roleTranslationMap = {
-    "Président": "president", "Vice Président": "vice_president", "Secrétaire Général": "secretary_general",
-    "Secrétaire Général Adjoint": "deputy_sec", "Trésorier": "treasurer", "Commissaire aux comptes": "auditor",
-    "Censeur N°1": "censor_1", "Censeur N°2": "censor_2", "Chargé des Sports et de la Culture": "sports_culture",
-    "Conseiller Spécial": "special_advisor"
+  // ... (COLLEZ ICI TOUT VOTRE 'roleTranslationMap' ORIGINAL) ...
 };
 
 let currentLang = localStorage.getItem('acaba_lang') || 'fr';
 let matchSortOrder = 'asc';
-
 let appData = {
-    members: [], contributions: [], expenses: [], sanctions: [],
-    referees: [], matches: [], injuries: [],
-    officialDocs: { statut: "", reglement: "" },
-    settings: { name: "ACABA", logo: "" }
+  members: [], contributions: [], expenses: [], sanctions: [],
+  referees: [], matches: [], injuries: [],
+  officialDocs: { statut: "", reglement: "" },
+  settings: { name: "ACABA", logo: "" }
 };
 
 let contribChartInstance = null;
@@ -273,43 +282,108 @@ document.addEventListener('DOMContentLoaded', () => {
     applyTranslations(); checkMobileView(); renderAll();
 });
 
-function loadData() {
-    const stored = localStorage.getItem('acaba_data');
-    if (stored) {
+async function loadData() {
+  showToast(currentLang === 'fr' ? 'Chargement des données...' : 'Loading data...');
+  
+  try {
+    // 1. Essayer de charger depuis le cloud Supabase
+    const { data, error } = await supabase.from('app_state').select('data').eq('id', 1).single();
+    
+    if (data && data.data) {
+      appData = data.data;
+      
+      // Migration automatique si ancien format détecté (nom -> lastName, etc.)
+      if (appData.members && appData.members.length > 0 && appData.members[0].nom) {
+        appData.members = appData.members.map(m => ({
+          id: m.id || Date.now().toString(), lastName: m.nom || '', firstName: m.prenom || '',
+          dob: m.dateNaissance || '', pob: m.lieuNaissance || '', gender: m.sexe || 'Masculin',
+          civilStatus: m.situation || '', profession: m.profession || '', category: m.categorie || 'Jeune',
+          team: m.equipe || 'A', isCaptain: m.capitaine || false, position: m.poste || '',
+          number: m.numero || '', phone: m.tel || '', email: m.email || '', address: m.adresse || '',
+          photo: m.photo || '', fonction: m.fonction || '', statutAdhesion: m.statutAdhesion || 'aucun',
+          status: m.status || 'Actif'
+        }));
+        await saveData(); // Sauvegarder le format migré dans le cloud
+      }
+      
+      // Vérification que toutes les clés existent
+      if (!appData.settings) appData.settings = { name: "ACABA", logo: "" };
+      if (!appData.sanctions) appData.sanctions = [];
+      if (!appData.referees) appData.referees = [];
+      if (!appData.matches) appData.matches = [];
+      if (!appData.injuries) appData.injuries = [];
+      if (!appData.officialDocs) appData.officialDocs = { statut: "", reglement: "" };
+      
+      // Mettre en cache local pour un chargement instantané hors ligne
+      localStorage.setItem('acaba_data', JSON.stringify(appData));
+      
+    } else {
+      // 2. Fallback : Si le cloud est vide, utiliser le localStorage existant
+      const stored = localStorage.getItem('acaba_data');
+      if (stored) {
         let parsed = JSON.parse(stored);
+        
+        // Migration locale si nécessaire
         if (parsed.members && parsed.members.length > 0 && parsed.members[0].nom) {
-            parsed.members = parsed.members.map(m => ({
-                id: m.id || Date.now().toString(), lastName: m.nom || '', firstName: m.prenom || '',
-                dob: m.dateNaissance || '', pob: m.lieuNaissance || '', gender: m.sexe || 'Masculin',
-                civilStatus: m.situation || '', profession: m.profession || '', category: m.categorie || 'Jeune',
-                team: m.equipe || 'A', isCaptain: m.capitaine || false, position: m.poste || '',
-                number: m.numero || '', phone: m.tel || '', email: m.email || '', address: m.adresse || '',
-                photo: m.photo || '', fonction: m.fonction || '', statutAdhesion: m.statutAdhesion || 'aucun',
-                status: m.status || 'Actif'
-            }));
+          parsed.members = parsed.members.map(m => ({
+            id: m.id || Date.now().toString(), lastName: m.nom || '', firstName: m.prenom || '',
+            dob: m.dateNaissance || '', pob: m.lieuNaissance || '', gender: m.sexe || 'Masculin',
+            civilStatus: m.situation || '', profession: m.profession || '', category: m.categorie || 'Jeune',
+            team: m.equipe || 'A', isCaptain: m.capitaine || false, position: m.poste || '',
+            number: m.numero || '', phone: m.tel || '', email: m.email || '', address: m.adresse || '',
+            photo: m.photo || '', fonction: m.fonction || '', statutAdhesion: m.statutAdhesion || 'aucun',
+            status: m.status || 'Actif'
+          }));
         }
         appData = parsed;
         if (!appData.settings) appData.settings = { name: "ACABA", logo: "" };
         if (!appData.sanctions) appData.sanctions = [];
-        if (!appData.referees) appData.referees = []; 
+        if (!appData.referees) appData.referees = [];
         if (!appData.matches) appData.matches = [];
         if (!appData.injuries) appData.injuries = [];
         if (!appData.officialDocs) appData.officialDocs = { statut: "", reglement: "" };
-        saveData();
+        
+        await saveData(); // Envoyer immédiatement vers le cloud
+      }
     }
+    
+    renderAll();
+    showToast(currentLang === 'fr' ? 'Données chargées ✓' : 'Data loaded ✓');
+  } catch (err) {
+    console.error("Erreur de chargement:", err);
+    showToast("Erreur de connexion. Mode hors ligne.", true);
+    // Fallback ultime en cas d'erreur réseau
+    const stored = localStorage.getItem('acaba_data');
+    if (stored) {
+      appData = JSON.parse(stored);
+      renderAll();
+    }
+  }
 }
 
-function saveData() { 
-    try {
-        localStorage.setItem('acaba_data', JSON.stringify(appData)); 
-        updateStorageUsage(); return true;
-    } catch (e) {
-        console.error("Erreur de sauvegarde:", e);
-        showToast(translations.storage_full[currentLang], true);
-        return false;
+async function saveData() {
+  try {
+    // 1. Sauvegarde locale immédiate (pour la rapidité et la sécurité hors ligne)
+    localStorage.setItem('acaba_data', JSON.stringify(appData));
+    updateStorageUsage();
+    
+    // 2. Sauvegarde dans le cloud Supabase
+    const { error } = await supabase.from('app_state').upsert({ 
+      id: 1, 
+      data: appData 
+    });
+    
+    if (error) {
+      console.error("Erreur sauvegarde Supabase:", error);
+      // On ne bloque pas l'utilisateur, la donnée est déjà en local
     }
+    return true;
+  } catch (e) {
+    console.error("Erreur de sauvegarde:", e);
+    showToast(translations.storage_full[currentLang], true);
+    return false;
+  }
 }
-
 function compressImage(file, maxWidth, quality, callback) {
     const reader = new FileReader();
     reader.onload = function(e) {
